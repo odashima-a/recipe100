@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>100kcal前後レシピ検索サイト</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>100kcal前後レシピ検索</h1>
+      <p>約100kcal前後で、野菜・卵・豆腐・ハムなどを使ったレシピを100品まとめました。</p>
+      <p>卵は1個70g、キャベツ1/4個=250g、白菜1/4株=300g、もやし200gを基本としています。</p>
+      <p>分量を変えたい食材の倍率だけ変更すると、自動でカロリーを再計算できます。</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="filters" aria-label="検索条件">
+      <div class="filter-group">
+        <label for="search">キーワード検索</label>
+        <input
+          id="search"
+          type="text"
+          placeholder="料理名・食材名で検索（例：キャベツ / 卵 / もやし）"
+        />
+      </div>
+
+      <div class="filter-group">
+        <label for="category">カテゴリ</label>
+        <select id="category">
+          <option value="all">すべて</option>
+          <option value="サラダ">サラダ</option>
+          <option value="汁物">汁物</option>
+          <option value="温かいおかず">温かいおかず</option>
+          <option value="デザート">デザート</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="mainIngredient">主な食材</label>
+        <select id="mainIngredient">
+          <option value="all">すべて</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="maxKcal">最大カロリー</label>
+        <input id="maxKcal" type="range" min="70" max="200" value="150" />
+        <div class="range-value">
+          ～ <span id="maxKcalValue">150</span> kcal で絞り込み
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <label for="sortBy">並び替え</label>
+        <select id="sortBy">
+          <option value="kcal-asc">カロリーが低い順</option>
+          <option value="kcal-desc">カロリーが高い順</option>
+          <option value="name-asc">名前順（あいうえお）</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="results-header">
+      <h2>レシピ一覧</h2>
+      <span id="resultCount"></span>
+    </section>
+
+    <section id="recipesContainer" class="recipes-grid" aria-label="レシピ一覧">
+    </section>
+
+    <section id="weeklyPlanSection" class="weekly-plan" aria-label="1週間おすすめプラン">
+      <h2>1週間おすすめプラン</h2>
+      <p class="weekly-plan-desc">
+        サラダ・汁物・温かいおかず・デザートから、それぞれ1品ずつ組み合わせた1日セットを7日分自動で表示します。
+        料理名をタップすると、下のレシピカードへスクロールします。
+      </p>
+      <div id="weeklyPlanContainer" class="weekly-plan-grid">
+      </div>
+    </section>
+  </main>
+
+  <script src="recipe-data.js"></script>
+  <script>
+    const searchInput = document.getElementById("search");
+    const categorySelect = document.getElementById("category");
+    const mainIngredientSelect = document.getElementById("mainIngredient");
+    const maxKcalRange = document.getElementById("maxKcal");
+    const maxKcalValueSpan = document.getElementById("maxKcalValue");
+    const sortBySelect = document.getElementById("sortBy");
+    const recipesContainer = document.getElementById("recipesContainer");
+    const resultCount = document.getElementById("resultCount");
+    const weeklyPlanContainer = document.getElementById("weeklyPlanContainer");
+
+    const adjustState = {};
+
+    function initAdjustState() {
+      recipes.forEach((r) => {
+        adjustState[r.id] = { factors: (r.ingredients || []).map(() => 1) };
+      });
+    }
+
+    function populateMainIngredients() {
+      const ingredients = Array.from(
+        new Set(recipes.map((r) => r.mainIngredient))
+      ).sort((a, b) => a.localeCompare(b, "ja"));
+      ingredients.forEach((ing) => {
+        const opt = document.createElement("option");
+        opt.value = ing;
+        opt.textContent = ing;
+        mainIngredientSelect.appendChild(opt);
+      });
+    }
+
+    function calculateTotalKcal(recipe) {
+      const state = adjustState[recipe.id];
+      if (!state) return recipe.kcal;
+      const factors = state.factors || [];
+      let total = 0;
+      (recipe.ingredients || []).forEach((ing, idx) => {
+        const base = ing.kcal || 0;
+        const factor = factors[idx] != null ? factors[idx] : 1;
+        total += base * factor;
+      });
+      return Math.round(total);
+    }
+
+    function renderRecipes(list) {
+      recipesContainer.innerHTML = "";
+
+      if (!list.length) {
+        recipesContainer.innerHTML =
+          '<p class="no-result">条件に合うレシピが見つかりませんでした。</p>';
+        resultCount.textContent = "0件";
+        return;
+      }
+
+      list.forEach((recipe) => {
+        const card = document.createElement("article");
+        card.className = "card";
+        card.id = "recipe-" + recipe.id;
+        card.setAttribute("tabindex", "0");
+
+        const header = document.createElement("div");
+        header.className = "card-header";
+
+        const title = document.createElement("h3");
+        title.className = "card-title";
+        title.textContent = recipe.name;
+
+        const kcal = document.createElement("div");
+        kcal.className = "card-kcal";
+        const currentTotal = calculateTotalKcal(recipe);
+        kcal.textContent = currentTotal + " kcal";
+
+        header.appendChild(title);
+        header.appendChild(kcal);
+
+        const pillRow = document.createElement("div");
+        pillRow.className = "pill-row";
+
+        const catPill = document.createElement("span");
+        catPill.className = "pill category";
+        catPill.textContent = recipe.category;
+        pillRow.appendChild(catPill);
+
+        const mainPill = document.createElement("span");
+        mainPill.className = "pill main-ingredient";
+        mainPill.textContent = "主食材: " + recipe.mainIngredient;
+        pillRow.appendChild(mainPill);
+
+        const summary = document.createElement("p");
+        summary.className = "card-summary";
+        summary.textContent = recipe.summary || "";
+
+        const toggle = document.createElement("span");
+        toggle.className = "card-toggle";
+        toggle.textContent = "材料と作り方を表示";
+        toggle.setAttribute("role", "button");
+
+        const details = document.createElement("div");
+        details.className = "details";
+
+        const ingTitle = document.createElement("h4");
+        ingTitle.textContent = "材料とカロリー（目安・倍率1.0時）";
+        details.appendChild(ingTitle);
+
+        const ingList = document.createElement("ul");
+        ingList.className = "ingredients-list";
+        (recipe.ingredients || []).forEach((ing) => {
+          const li = document.createElement("li");
+          li.textContent = ing.name + "（" + ing.amount + "） - " + ing.kcal + " kcal";
+          ingList.appendChild(li);
+        });
+        details.appendChild(ingList);
+
+        const adjustToggle = document.createElement("button");
+        adjustToggle.type = "button";
+        adjustToggle.className = "adjust-toggle-btn";
+        adjustToggle.textContent = "分量を変更してカロリー再計算";
+        details.appendChild(adjustToggle);
+
+        const adjustPanel = document.createElement("div");
+        adjustPanel.className = "adjust-panel";
+        adjustPanel.style.display = "none";
+
+        const adjustInfo = document.createElement("p");
+        adjustInfo.className = "adjust-info";
+        adjustInfo.textContent =
+          "倍率を変更すると、その食材のカロリーと合計カロリーが自動で再計算されます（1.0＝レシピ記載量）。";
+        adjustPanel.appendChild(adjustInfo);
+
+        const adjustTable = document.createElement("table");
+        adjustTable.className = "adjust-table";
+
+        const thead = document.createElement("thead");
+        thead.innerHTML =
+          "<tr><th>食材</th><th>元の量</th><th>倍率</th><th>現在のカロリー</th></tr>";
+        adjustTable.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+
+        (recipe.ingredients || []).forEach((ing, idx) => {
+          const tr = document.createElement("tr");
+
+          const tdName = document.createElement("td");
+          tdName.textContent = ing.name;
+          tr.appendChild(tdName);
+
+          const tdAmount = document.createElement("td");
+          tdAmount.textContent = ing.amount || "";
+          tr.appendChild(tdAmount);
+
+          const tdFactor = document.createElement("td");
+          const input = document.createElement("input");
+          input.type = "number";
+          input.step = "0.1";
+          input.min = "0";
+          const state = adjustState[recipe.id];
+          const currentFactor =
+            state && state.factors && state.factors[idx] != null
+              ? state.factors[idx]
+              : 1;
+          input.value = currentFactor;
+          input.className = "factor-input";
+          tdFactor.appendChild(input);
+          tr.appendChild(tdFactor);
+
+          const tdKcal = document.createElement("td");
+          tdKcal.className = "current-kcal-cell";
+          const currK = Math.round((ing.kcal || 0) * currentFactor);
+          tdKcal.textContent = currK + " kcal";
+          tr.appendChild(tdKcal);
+
+          input.addEventListener("input", () => {
+            let v = parseFloat(input.value);
+            if (Number.isNaN(v) || v < 0) v = 0;
+            adjustState[recipe.id].factors[idx] = v;
+
+            const newIngKcal = Math.round((ing.kcal || 0) * v);
+            tdKcal.textContent = newIngKcal + " kcal";
+
+            const newTotal = calculateTotalKcal(recipe);
+            kcal.textContent = newTotal + " kcal";
+            totalKcalSpan.textContent = newTotal + " kcal";
+          });
+
+          tbody.appendChild(tr);
+        });
+
+        adjustTable.appendChild(tbody);
+        adjustPanel.appendChild(adjustTable);
+
+        const totalRow = document.createElement("div");
+        totalRow.className = "adjust-total-row";
+
+        const totalLabel = document.createElement("span");
+        totalLabel.textContent = "このレシピの現在の合計:";
+        totalRow.appendChild(totalLabel);
+
+        const totalKcalSpan = document.createElement("span");
+        totalKcalSpan.className = "adjust-total-kcal";
+        totalKcalSpan.textContent = calculateTotalKcal(recipe) + " kcal";
+        totalRow.appendChild(totalKcalSpan);
+
+        const resetBtn = document.createElement("button");
+        resetBtn.type = "button";
+        resetBtn.className = "reset-btn";
+        resetBtn.textContent = "倍率をすべて1.0に戻す";
+        totalRow.appendChild(resetBtn);
+
+        resetBtn.addEventListener("click", () => {
+          const state = adjustState[recipe.id];
+          if (!state) return;
+          state.factors = (recipe.ingredients || []).map(() => 1);
+          const inputs = adjustPanel.querySelectorAll("input.factor-input");
+          const kcalCells = adjustPanel.querySelectorAll(".current-kcal-cell");
+          (recipe.ingredients || []).forEach((ing, idx) => {
+            if (inputs[idx]) inputs[idx].value = 1;
+            if (kcalCells[idx]) {
+              kcalCells[idx].textContent = (ing.kcal || 0) + " kcal";
+            }
+          });
+          const baseTotal = calculateTotalKcal(recipe);
+          kcal.textContent = baseTotal + " kcal";
+          totalKcalSpan.textContent = baseTotal + " kcal";
+        });
+
+        adjustPanel.appendChild(totalRow);
+        details.appendChild(adjustPanel);
+
+        const stepsTitle = document.createElement("h4");
+        stepsTitle.textContent = "作り方";
+        details.appendChild(stepsTitle);
+
+        const stepsList = document.createElement("ol");
+        stepsList.className = "steps-list";
+        (recipe.steps || []).forEach((s) => {
+          const li = document.createElement("li");
+          li.textContent = s;
+          stepsList.appendChild(li);
+        });
+        details.appendChild(stepsList);
+
+        const toggleDetails = () => {
+          const isVisible = details.style.display === "block";
+          details.style.display = isVisible ? "none" : "block";
+          toggle.textContent = isVisible
+            ? "材料と作り方を表示"
+            : "材料と作り方を隠す";
+        };
+
+        toggle.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleDetails();
+        });
+        adjustToggle.addEventListener("click", (e) => {
+          e.stopPropagation();
+          adjustPanel.style.display =
+            adjustPanel.style.display === "none" ? "block" : "none";
+        });
+        card.addEventListener("click", (e) => {
+          if (
+            !e.target.classList.contains("card-toggle") &&
+            !e.target.classList.contains("adjust-toggle-btn") &&
+            !e.target.classList.contains("reset-btn") &&
+            !e.target.classList.contains("factor-input")
+          ) {
+            toggleDetails();
+          }
+        });
+
+        card.appendChild(header);
+        card.appendChild(pillRow);
+        card.appendChild(summary);
+        card.appendChild(toggle);
+        card.appendChild(details);
+
+        recipesContainer.appendChild(card);
+      });
+
+      resultCount.textContent = list.length + "件";
+    }
+
+    function applyFilters() {
+      const keyword = searchInput.value.trim().toLowerCase();
+      const category = categorySelect.value;
+      const mainIng = mainIngredientSelect.value;
+      const maxKcal = parseInt(maxKcalRange.value, 10);
+      const sortBy = sortBySelect.value;
+
+      let filtered = recipes.filter((r) => {
+        const totalKcal = calculateTotalKcal(r);
+        if (category !== "all" && r.category !== category) return false;
+        if (mainIng !== "all" && r.mainIngredient !== mainIng) return false;
+        if (totalKcal > maxKcal) return false;
+
+        if (keyword) {
+          const text =
+            (r.name +
+              r.mainIngredient +
+              (r.ingredients || []).map((i) => i.name).join("")).toLowerCase();
+          if (!text.includes(keyword)) return false;
+        }
+        return true;
+      });
+
+      filtered.sort((a, b) => {
+        if (sortBy === "kcal-asc") return calculateTotalKcal(a) - calculateTotalKcal(b);
+        if (sortBy === "kcal-desc") return calculateTotalKcal(b) - calculateTotalKcal(a);
+        if (sortBy === "name-asc") return a.name.localeCompare(b.name, "ja");
+        return 0;
+      });
+
+      renderRecipes(filtered);
+    }
+
+    function buildWeeklyPlan() {
+      weeklyPlanContainer.innerHTML = "";
+      const salads = recipes.filter((r) => r.category === "サラダ");
+      const soups = recipes.filter((r) => r.category === "汁物");
+      const warms = recipes.filter((r) => r.category === "温かいおかず");
+      const desserts = recipes.filter((r) => r.category === "デザート");
+
+      const days = ["月", "火", "水", "木", "金", "土", "日"];
+
+      days.forEach((day, idx) => {
+        const card = document.createElement("div");
+        card.className = "weekly-card";
+
+        const title = document.createElement("h3");
+        title.textContent = day + "曜日セット";
+        card.appendChild(title);
+
+        const list = document.createElement("ul");
+        list.className = "weekly-list";
+
+        function pick(arr) {
+          if (!arr.length) return null;
+          return arr[idx % arr.length];
+        }
+
+        const items = [
+          { label: "サラダ", recipe: pick(salads) },
+          { label: "汁物", recipe: pick(soups) },
+          { label: "温かいおかず", recipe: pick(warms) },
+          { label: "デザート", recipe: pick(desserts) },
+        ];
+
+        let totalKcal = 0;
+
+        items.forEach((it) => {
+          if (!it.recipe) return;
+          const li = document.createElement("li");
+
+          const nameBtn = document.createElement("button");
+          nameBtn.type = "button";
+          nameBtn.className = "weekly-recipe-link";
+          nameBtn.textContent = "[" + it.label + "] " + it.recipe.name;
+          nameBtn.addEventListener("click", () => {
+            const target = document.getElementById("recipe-" + it.recipe.id);
+            if (target) {
+              target.scrollIntoView({ behavior: "smooth", block: "start" });
+              target.classList.add("highlight");
+              setTimeout(() => target.classList.remove("highlight"), 1200);
+            }
+          });
+
+          const kcalSpan = document.createElement("span");
+          const baseTotal = calculateTotalKcal(it.recipe);
+          kcalSpan.textContent = baseTotal + " kcal";
+          totalKcal += baseTotal;
+
+          li.appendChild(nameBtn);
+          li.appendChild(kcalSpan);
+          list.appendChild(li);
+        });
+
+        card.appendChild(list);
+
+        const total = document.createElement("p");
+        total.className = "weekly-total";
+        total.textContent = "この日の合計（目安）: " + totalKcal + " kcal";
+        card.appendChild(total);
+
+        weeklyPlanContainer.appendChild(card);
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      initAdjustState();
+      populateMainIngredients();
+      maxKcalValueSpan.textContent = maxKcalRange.value;
+      applyFilters();
+      buildWeeklyPlan();
+    });
+
+    searchInput.addEventListener("input", applyFilters);
+    categorySelect.addEventListener("change", applyFilters);
+    mainIngredientSelect.addEventListener("change", applyFilters);
+    maxKcalRange.addEventListener("input", () => {
+      maxKcalValueSpan.textContent = maxKcalRange.value;
+      applyFilters();
+    });
+    sortBySelect.addEventListener("change", applyFilters);
+  </script>
+</body>
+</html>
